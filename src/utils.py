@@ -4,12 +4,28 @@ from pathlib import Path
 from src.logger import logger
 
 
-def natural_sort_key(value: str):
-    """Sort names naturally, e.g. image2 before image10."""
-    return [
-        (0, int(part)) if part.isdigit() else (1, part.lower())
-        for part in re.split(r"(\d+)", value)
-    ]
+def natural_sort_key(filename: str):
+    """
+    Sort filenames primarily by the first number appearing
+    in the filename.
+    """
+
+    stem = Path(filename).stem
+
+    numbers = re.findall(r"\d+", stem)
+
+    if numbers:
+        return (
+            0,
+            tuple(int(number) for number in numbers),
+            stem.lower(),
+        )
+
+    return (
+        1,
+        (),
+        stem.lower(),
+    )
 
 
 def get_longest_common_prefix(names: list[str]) -> str:

@@ -1,5 +1,5 @@
 from pathlib import Path
-
+from tqdm import tqdm
 from pypdf import PdfWriter
 
 from src.logger import logger
@@ -21,25 +21,30 @@ def execute_merge(request: MergeRequest) -> None:
     clean_directory(cache_dir)
 
     chunked_pdf_paths: list[Path] = []
-    pdf_files = sorted(request.input_files, key=lambda p: p.name.lower())
+    pdf_files = request.input_files
 
     try:
         logger.info(f"Merging {len(pdf_files)} PDFs...")
 
-        for start in range(0, len(pdf_files), request.chunk_size):
-            chunk = pdf_files[start:start + request.chunk_size]
-            chunk_path = cache_dir / f"merge_{start + 1}-{start + len(chunk)}.pdf"
-            writer = PdfWriter()
-            try:
-                for pdf_path in chunk:
-                    logger.info(f"  Adding: {pdf_path.name}")
-                    writer.append(pdf_path)
-                with chunk_path.open("wb") as output_file:
-                    writer.write(output_file)
-                chunked_pdf_paths.append(chunk_path)
-            finally:
-                writer.close()
+        with tqdm(total=len(pdf_files), desc="Merging PDFs", unit="file", dynamic_ncols=True) as pbar:
+            for start in range(0, len(pdf_files), request.chunk_size):
+                chunk = pdf_files[start:start + request.chunk_size]
+                chunk_path = cache_dir / f"merge_{start + 1}-{start + len(chunk)}.pdf"
 
+                writer = PdfWriter()
+                try:
+                    for pdf_path in chunk:
+                        logger.debug(f"  Adding: {pdf_path.name}")
+                        writer.append(pdf_path)
+                        pbar.update(1)
+                    with chunk_path.open("wb") as output_file:
+                        writer.write(output_file)
+                    chunked_pdf_paths.append(chunk_path)
+                finally:
+                    writer.close()
+
+        
+        logger.info("Compiling final document...")
         final_path = unique_output_path(request.output_path)
         final_writer = PdfWriter()
         try:
@@ -50,7 +55,8 @@ def execute_merge(request: MergeRequest) -> None:
         finally:
             final_writer.close()
 
-        logger.info(f"Created: {final_path}")
+        logger.info(f"Successfully Created: {final_path.name}")
+
     except Exception as exc:
         logger.error(f"Merge failed: {exc}")
     finally:

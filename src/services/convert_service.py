@@ -1,6 +1,6 @@
 from pathlib import Path
 import zlib
-
+from tqdm import tqdm
 from PIL import Image
 from pypdf import PdfWriter
 from pypdf.generic import (
@@ -99,12 +99,15 @@ def _add_image_page(writer: PdfWriter, image_path: Path) -> None:
         page[NameObject("/Contents")] = content_ref
 
 
-def _write_images_to_pdf(image_files: list[Path], output_path: Path) -> None:
+def _write_images_to_pdf(image_files: list[Path], output_path: Path, pbar: tqdm | None = None) -> None:
     """Write a list of images directly into one PDF."""
     writer = PdfWriter()
     try:
         for image_path in image_files:
             _add_image_page(writer, image_path)
+            if pbar is not None:
+                pbar.update(1)
+
         with output_path.open("wb") as output_file:
             writer.write(output_file)
     finally:
@@ -116,14 +119,17 @@ def convert_images_separately(request: SeparateImagePdfRequest) -> list[Path]:
     request.output_dir.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
 
-    for image_path in request.image_files:
-        output_path = unique_output_path(request.output_dir / f"{image_path.stem}.pdf")
-        try:
-            _write_images_to_pdf([image_path], output_path)
-            created.append(output_path)
-            logger.info(f"Created: {output_path.name}")
-        except Exception as exc:
-            logger.error(f"Failed to convert '{image_path.name}': {exc}")
+    logger.info(f"Converting {len(request.image_files)} images separately...")
+
+    with tqdm(total=len(request.image_files), desc="Converting images", unit="img", dynamic_ncols=True) as pbar:
+        for image_path in request.image_files:
+            output_path = unique_output_path(request.output_dir / f"{image_path.stem}.pdf")
+            try:
+                _write_images_to_pdf([image_path], output_path)
+                created.append(output_path)
+                logger.info(f"Created: {output_path.name}")
+            except Exception as exc:
+                logger.error(f"Failed to convert '{image_path.name}': {exc}")
 
     return created
 
@@ -145,20 +151,24 @@ def convert_images_to_pdf(request: ImagePdfRequest) -> None:
     image_files = sorted(request.image_files, key=lambda p: natural_sort_key(p.name))
 
     try:
-        for start in range(0, len(image_files), request.chunk_size):
-            chunk = image_files[start:start + request.chunk_size]
-            chunk_path = cache_dir / f"chunk_{start + 1}-{start + len(chunk)}.pdf"
-            logger.info(
-                f"Converting images {start + 1}-{start + len(chunk)} "
-                f"of {len(image_files)}..."
-            )
-            try:
-                _write_images_to_pdf(chunk, chunk_path)
-                chunk_paths.append(chunk_path)
-            except Exception as exc:
-                logger.error(f"Failed converting chunk {start + 1}-{start + len(chunk)}: {exc}")
-                raise
+        logger.info(f"Converting {len(image_files)} images into {request.output_path.name}...")
+        
+        with tqdm(total=len(image_files), desc="Converting images", unit="img", dynamic_ncols=True) as pbar:
+            for start in range(0, len(image_files), request.chunk_size):
+                chunk = image_files[start:start + request.chunk_size]
+                chunk_path = cache_dir / f"chunk_{start + 1}-{start + len(chunk)}.pdf"
+                logger.info(
+                    f"Converting images {start + 1}-{start + len(chunk)} "
+                    f"of {len(image_files)}..."
+                )
+                try:
+                    _write_images_to_pdf(chunk, chunk_path, pbar)
+                    chunk_paths.append(chunk_path)
+                except Exception as exc:
+                    logger.error(f"Failed converting chunk {start + 1}-{start + len(chunk)}: {exc}")
+                    raise   
 
+        logger.info("Compiling final document...")
         final_path = unique_output_path(request.output_path)
         final_writer = PdfWriter()
         try:
@@ -169,7 +179,7 @@ def convert_images_to_pdf(request: ImagePdfRequest) -> None:
         finally:
             final_writer.close()
 
-        logger.info(f"Created: {final_path}")
+        logger.info(f"Successfully Created: {final_path.name}")
     finally:
         clean_directory(cache_dir)
         try:
