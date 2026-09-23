@@ -1,22 +1,11 @@
 from pathlib import Path
 
 import questionary
-from pypdf import PdfReader
-
 from src.config import get_output_directory
 from src.logger import logger
 from src.models.dtos import RotateRequest, SplitRequest
 from src.services.pdf_service import find_pdfs, get_pdf_info, rotate_pdf, split_pdf
-from src.utils import ensure_pdf_extension, sanitize_filename
-
-
-def _format_size(size_bytes: int) -> str:
-    size = float(size_bytes)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            return f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size_bytes} B"
+from src.utils import ensure_pdf_extension, format_file_size, sanitize_filename
 
 
 def handle_pdf_tools_ui(current_directory: Path) -> None:
@@ -59,7 +48,7 @@ def _show_pdf_info(current_directory: Path) -> None:
         info = get_pdf_info(pdf_path)
         print("\n" + "-" * 45)
         print(f"File:      {pdf_path.name}")
-        print(f"Size:      {_format_size(int(info['size_bytes']))}")
+        print(f"Size:      {format_file_size(int(info['size_bytes']))}")
         print(f"Pages:     {info['pages']}")
         print(f"Encrypted: {'Yes' if info['encrypted'] else 'No'}")
         print("Metadata:")

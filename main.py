@@ -1,6 +1,7 @@
 import questionary
 
 from src.config import get_current_directory
+from src.controllers.compress_controller import handle_compress_ui
 from src.controllers.converter_controller import handle_image_to_pdf_ui
 from src.controllers.merge_controller import handle_merge_ui
 from src.controllers.pdf_controller import handle_pdf_tools_ui
@@ -17,11 +18,11 @@ def main() -> None:
 
     try:
         while True:
-            print("\n" + "=" * 45)
-            print("                  pdf-tools")
-            print("=" * 45)
+            print("\n" + "=" * 50)
+            print("                     pdf-tools")
+            print("=" * 50)
             print(f"Current directory: {current_directory}")
-            print("=" * 45)
+            print("=" * 50)
 
             choice = questionary.select(
                 "Choose an operation:",
@@ -29,6 +30,7 @@ def main() -> None:
                     "Image -> PDF",
                     "Merge PDF",
                     "PDF Tools",
+                    "Compress PDF",
                     "Exit",
                 ],
             ).ask()
@@ -39,6 +41,8 @@ def main() -> None:
                 handle_merge_ui(current_directory)
             elif choice == "PDF Tools":
                 handle_pdf_tools_ui(current_directory)
+            elif choice == "Compress PDF":
+                handle_compress_ui(current_directory)
             else:
                 logger.info("Exiting pdf-tools. Goodbye!")
                 return

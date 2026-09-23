@@ -39,3 +39,35 @@ class RotateRequest:
     input_path: Path
     output_path: Path
     angle: int
+
+
+@dataclass(frozen=True)
+class CompressRequest:
+    """Request for previewing/finalizing PDF compression."""
+    input_path: Path
+    output_path: Path
+    mode: str = "lossless"
+    dpi: int = 150
+    quality: int = 80
+    grayscale: bool = False
+
+
+@dataclass(frozen=True)
+class CompressionPreview:
+    """Result of a compression dry-run saved to a temporary PDF."""
+    temporary_path: Path
+    original_size: int
+    compressed_size: int
+    pages: int
+    image_count: int
+    mode: str
+
+    @property
+    def bytes_saved(self) -> int:
+        return self.original_size - self.compressed_size
+
+    @property
+    def reduction_percent(self) -> float:
+        if self.original_size <= 0:
+            return 0.0
+        return (self.bytes_saved / self.original_size) * 100.0
