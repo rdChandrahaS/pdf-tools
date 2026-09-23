@@ -1,44 +1,51 @@
+import questionary
+
 from src.config import get_current_directory
 from src.controllers.converter_controller import handle_image_to_pdf_ui
 from src.controllers.merge_controller import handle_merge_ui
+from src.controllers.pdf_controller import handle_pdf_tools_ui
 from src.logger import logger, setup_logging
 
-import questionary
-
+APP_NAME = "pdf-tools"
 
 def main() -> None:
     setup_logging()
     current_directory = get_current_directory()
 
     logger.info(f"Working directory: {current_directory}")
-    logger.info("Starting pdf-tools...")
+    logger.info("Starting {APP_NAME}...")
 
-    while True:
-        print("\n" + "=" * 45)
-        print("                  pdf-tools")
-        print("=" * 45)
-        print(f"Current directory: {current_directory}")
-        print("=" * 45)
+    try:
+        while True:
+            print("\n" + "=" * 45)
+            print("                  pdf-tools")
+            print("=" * 45)
+            print(f"Current directory: {current_directory}")
+            print("=" * 45)
 
-        choice = questionary.select(
-            "Choose the operation:",
-            choices=[
-                "Image -> PDF",
-                "Merge PDF",
-                "Exit",
-            ],
-        ).ask()
+            choice = questionary.select(
+                "Choose an operation:",
+                choices=[
+                    "Image -> PDF",
+                    "Merge PDF",
+                    "PDF Tools",
+                    "Exit",
+                ],
+            ).ask()
 
-        if choice == "Image -> PDF":
-            handle_image_to_pdf_ui(current_directory)
-
-        elif choice == "Merge PDF":
-            handle_merge_ui(current_directory)
-
-        elif choice == "Exit" or choice is None:
-            logger.info("Exiting pdf-tools. Goodbye!")
-            return
-
+            if choice == "Image -> PDF":
+                handle_image_to_pdf_ui(current_directory)
+            elif choice == "Merge PDF":
+                handle_merge_ui(current_directory)
+            elif choice == "PDF Tools":
+                handle_pdf_tools_ui(current_directory)
+            else:
+                logger.info("Exiting pdf-tools. Goodbye!")
+                return
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user. Goodbye!")
+    except EOFError:
+        logger.info("Input stream closed. Goodbye!")
 
 if __name__ == "__main__":
     main()

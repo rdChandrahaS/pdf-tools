@@ -1,43 +1,57 @@
 from pathlib import Path
 
-from src.config import get_output_directory
+import questionary
+
+from src.config import DEFAULT_PDF_CHUNK_SIZE, get_output_directory
 from src.logger import logger
 from src.models.dtos import MergeRequest
 from src.services.merge_service import execute_merge
+from src.services.pdf_service import find_pdfs
 from src.utils import ensure_pdf_extension, get_longest_common_prefix, natural_sort_key, sanitize_filename
 
 
+def _ask_output_name(default_name: str) -> str | None:
+    answer = questionary.text("Output PDF name:", default=default_name).ask()
+    if answer is None:
+        return None
+    return ensure_pdf_extension(sanitize_filename(answer, default=default_name))
+
+
 def handle_merge_ui(current_directory: Path) -> None:
-    """Merge PDF files found directly in the current working directory."""
-    output_dir = get_output_directory()
-    pdf_files = [
-        path for path in current_directory.iterdir()
-        if path.is_file() and path.suffix.lower() == ".pdf"
-    ]
-    pdf_files.sort(key=lambda p: natural_sort_key(p.name))
+    """Merge selected PDF files found directly in the current working directory."""
+    output_dir = get_output_directory(current_directory)
+    pdf_files = find_pdfs(current_directory)
 
     if not pdf_files:
         logger.warning("No PDF files found directly in the current directory.")
         return
 
-    print("\n" + "-" * 45)
-    print(f"Found {len(pdf_files)} PDF file(s):")
-    for index, pdf_file in enumerate(pdf_files, 1):
-        print(f"  [{index}] {pdf_file.name}")
-    print("-" * 45)
+    selected = questionary.checkbox(
+        "Select PDFs to merge (they will follow the displayed natural order):",
+        choices=[questionary.Choice(path.name, value=path) for path in pdf_files],
+        validate=lambda choices: len(choices) >= 2,
+    ).ask()
+    if selected is None:
+        return
 
-    default_name = f"{get_longest_common_prefix([p.name for p in pdf_files])}.pdf"
-    user_name = input(f"Output PDF name (Enter = '{default_name}'): ").strip()
-    output_name = ensure_pdf_extension(
-        sanitize_filename(user_name or default_name, default=default_name)
+    selected.sort(key=lambda p: natural_sort_key(p.name))
+
+    default_name = f"{get_longest_common_prefix([p.name for p in selected])}.pdf"
+    output_name = _ask_output_name(default_name)
+    if output_name is None:
+        return
+
+    chunk_answer = questionary.text(
+        "PDFs per internal batch:",
+        default=str(DEFAULT_PDF_CHUNK_SIZE),
+        validate=lambda value: value.isdigit() and int(value) > 0,
+    ).ask()
+    chunk_size = int(chunk_answer) if chunk_answer else DEFAULT_PDF_CHUNK_SIZE
+
+    execute_merge(
+        MergeRequest(
+            input_files=selected,
+            output_path=output_dir / output_name,
+            chunk_size=chunk_size,
+        )
     )
-
-    batch_input = input("PDFs per internal batch (Enter = 10): ").strip()
-    chunk_size = int(batch_input) if batch_input.isdigit() and int(batch_input) > 0 else 10
-
-    request = MergeRequest(
-        input_files=pdf_files,
-        output_path=output_dir / output_name,
-        chunk_size=chunk_size,
-    )
-    execute_merge(request)

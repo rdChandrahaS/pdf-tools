@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from src.config import get_output_directory
+import questionary
+
+from src.config import DEFAULT_IMAGE_CHUNK_SIZE, get_output_directory
 from src.logger import logger
 from src.models.dtos import ImagePdfRequest, SeparateImagePdfRequest
 from src.services.convert_service import (
@@ -17,101 +19,152 @@ def _log_ignored_files(directory: Path) -> None:
         logger.warning(f"Ignoring unsupported file: {file_path.name}")
 
 
-def _ask_yes_no(prompt: str) -> bool:
-    while True:
-        answer = input(f"{prompt} [y/n]: ").strip().lower()
-        if answer in {"y", "yes"}:
-            return True
-        if answer in {"n", "no"}:
-            return False
-        print("Please enter y or n.")
-
-
-def _ask_output_name(default_name: str) -> str:
-    name = input(f"Output PDF name (Enter = '{default_name}'): ").strip()
-    name = sanitize_filename(name or default_name, default=default_name)
+def _ask_output_name(default_name: str) -> str | None:
+    answer = questionary.text(
+        "Output PDF name:",
+        default=default_name,
+        validate=lambda value: bool(value.strip()),
+    ).ask()
+    if answer is None:
+        return None
+    name = sanitize_filename(answer, default=default_name)
     return ensure_pdf_extension(name)
 
 
-def handle_image_to_pdf_ui(current_directory: Path) -> None:
-    """Run the Image -> PDF workflow against the current working directory."""
-    output_dir = get_output_directory()
+def _ask_chunk_size(default: int = DEFAULT_IMAGE_CHUNK_SIZE) -> int:
+    answer = questionary.text(
+        "Images per internal batch:",
+        default=str(default),
+        validate=lambda value: value.isdigit() and int(value) > 0,
+    ).ask()
+    return int(answer) if answer else default
 
-    print("\n" + "-" * 45)
-    print("Image -> PDF")
-    print("  [1] Convert every image separately")
-    print("  [2] Convert images into one PDF")
-    print("-" * 45)
 
-    choice = input("Choose an option: ").strip()
-
-    if choice == "1":
-        image_files = find_images(current_directory)
-        _log_ignored_files(current_directory)
-
-        if not image_files:
-            logger.warning("No supported images found in the current directory.")
-            return
-
-        logger.info(f"Found {len(image_files)} image(s) in the current directory.")
-        request = SeparateImagePdfRequest(
-            image_files=image_files,
-            output_dir=output_dir,
-        )
-        convert_images_separately(request)
+def _convert_one_pdf(
+    image_files: list[Path],
+    output_dir: Path,
+    default_name: str = "images.pdf",
+) -> None:
+    if not image_files:
+        logger.warning("No images selected.")
         return
 
-    if choice != "2":
-        logger.warning("Invalid Image -> PDF option.")
+    logger.info(f"Selected {len(image_files)} image(s).")
+    output_name = _ask_output_name(default_name)
+    if output_name is None:
         return
 
-    print("\nConvert images into one PDF")
-    current_images = find_images(current_directory)
+    request = ImagePdfRequest(
+        image_files=image_files,
+        output_path=output_dir / output_name,
+        chunk_size=_ask_chunk_size(),
+    )
+    convert_images_to_pdf(request)
+
+
+def _convert_current_images(current_directory: Path, output_dir: Path) -> None:
+    images = find_images(current_directory)
     _log_ignored_files(current_directory)
+    if not images:
+        logger.warning("No supported images found in the current directory.")
+        return
+    _convert_one_pdf(images, output_dir)
 
-    process_current_images = _ask_yes_no("Read all image files directly in the current directory?")
-    if process_current_images:
-        if not current_images:
-            logger.warning("No supported images found directly in the current directory.")
-        else:
-            default_name = "images.pdf"
-            output_name = _ask_output_name(default_name)
-            output_path = output_dir / output_name
-            request = ImagePdfRequest(
-                image_files=current_images,
-                output_path=output_path,
-                chunk_size=100,
-            )
-            convert_images_to_pdf(request)
 
-    process_folders = _ask_yes_no("Read all image-containing folders directly inside the current directory?")
-    if not process_folders:
+def _convert_selected_images(current_directory: Path, output_dir: Path) -> None:
+    images = find_images(current_directory)
+    if not images:
+        logger.warning("No supported images found in the current directory.")
         return
 
+    selected = questionary.checkbox(
+        "Select images to include:",
+        choices=[questionary.Choice(path.name, value=path) for path in images],
+        validate=lambda choices: bool(choices),
+    ).ask()
+    if selected is None:
+        return
+    _convert_one_pdf(selected, output_dir, default_name="selected-images.pdf")
+
+
+def _convert_folders(current_directory: Path, output_dir: Path) -> None:
     folders = sorted(
-        [path for path in current_directory.iterdir() if path.is_dir() and path.name != "output"],
+        [
+            path
+            for path in current_directory.iterdir()
+            if path.is_dir() and path.name not in {"output", ".git", ".pdf-tools-cache"}
+        ],
         key=lambda p: p.name.lower(),
     )
 
-    if not folders:
-        logger.warning("No folders found in the current directory.")
+    jobs: list[tuple[Path, list[Path]]] = []
+    for folder in folders:
+        folder_images = find_images(folder)
+        if folder_images:
+            jobs.append((folder, folder_images))
+
+    if not jobs:
+        logger.warning("No image-containing folders were found.")
         return
 
-    for folder in folders:
+    selected_folders = questionary.checkbox(
+        "Select folders to convert (one PDF per folder):",
+        choices=[
+            questionary.Choice(f"{folder.name} ({len(images)} image(s))", value=folder)
+            for folder, images in jobs
+        ],
+        validate=lambda choices: bool(choices),
+    ).ask()
+    if selected_folders is None:
+        return
+
+    for folder in selected_folders:
         folder_images = find_images(folder)
         if not folder_images:
             continue
-
-        for file_path in find_unsupported_files(folder):
-            logger.warning(f"Ignoring unsupported file in '{folder.name}': {file_path.name}")
-
-        output_name = ensure_pdf_extension(sanitize_filename(folder.name, default="folder"))
-        output_path = output_dir / output_name
-        logger.info(f"Processing folder '{folder.name}' ({len(folder_images)} image(s)).")
-
-        request = ImagePdfRequest(
-            image_files=folder_images,
-            output_path=output_path,
-            chunk_size=100,
+        _log_ignored_files(folder)
+        output_name = ensure_pdf_extension(
+            sanitize_filename(folder.name, default="folder")
         )
-        convert_images_to_pdf(request)
+        convert_images_to_pdf(
+            ImagePdfRequest(
+                image_files=folder_images,
+                output_path=output_dir / output_name,
+                chunk_size=DEFAULT_IMAGE_CHUNK_SIZE,
+            )
+        )
+
+
+def handle_image_to_pdf_ui(current_directory: Path) -> None:
+    """Run the interactive Image -> PDF workflow."""
+    output_dir = get_output_directory(current_directory)
+
+    while True:
+        choice = questionary.select(
+            "Image -> PDF",
+            choices=[
+                "Convert every image separately",
+                "Images in current directory -> one PDF",
+                "Select images -> one PDF",
+                "Immediate folders -> one PDF per folder",
+                "Back",
+            ],
+        ).ask()
+
+        if choice == "Convert every image separately":
+            image_files = find_images(current_directory)
+            _log_ignored_files(current_directory)
+            if not image_files:
+                logger.warning("No supported images found in the current directory.")
+                continue
+            convert_images_separately(
+                SeparateImagePdfRequest(image_files=image_files, output_dir=output_dir)
+            )
+        elif choice == "Images in current directory -> one PDF":
+            _convert_current_images(current_directory, output_dir)
+        elif choice == "Select images -> one PDF":
+            _convert_selected_images(current_directory, output_dir)
+        elif choice == "Immediate folders -> one PDF per folder":
+            _convert_folders(current_directory, output_dir)
+        else:
+            return
