@@ -1,9 +1,9 @@
-from pathlib import Path
-
 from src.config import get_current_directory
 from src.controllers.converter_controller import handle_image_to_pdf_ui
 from src.controllers.merge_controller import handle_merge_ui
 from src.logger import logger, setup_logging
+
+import questionary
 
 
 def main() -> None:
@@ -18,22 +18,26 @@ def main() -> None:
         print("                  pdf-tools")
         print("=" * 45)
         print(f"Current directory: {current_directory}")
-        print("  [1] Image -> PDF")
-        print("  [2] Merge PDF")
-        print("  [0] Exit")
         print("=" * 45)
 
-        choice = input("Choose an operation: ").strip()
+        choice = questionary.select(
+            "Choose the operation:",
+            choices=[
+                "Image -> PDF",
+                "Merge PDF",
+                "Exit",
+            ],
+        ).ask()
 
-        if choice == "1":
+        if choice == "Image -> PDF":
             handle_image_to_pdf_ui(current_directory)
-        elif choice == "2":
+
+        elif choice == "Merge PDF":
             handle_merge_ui(current_directory)
-        elif choice == "0":
+
+        elif choice == "Exit" or choice is None:
             logger.info("Exiting pdf-tools. Goodbye!")
             return
-        else:
-            logger.warning("Invalid choice. Please select 1, 2, or 0.")
 
 
 if __name__ == "__main__":
